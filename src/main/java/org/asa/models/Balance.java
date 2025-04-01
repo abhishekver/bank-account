@@ -27,7 +27,12 @@ public class Balance {
     @Version
     private long version;
 
-    public void updateBalance(double amount) {
-        this.amount += amount;
+    public boolean canApplyTransaction(double transactionAmount) {
+        return (this.amount + transactionAmount) >= 0;
+    }
+
+    public void applyTransaction(Double transactionAmount) {
+        this.amount += transactionAmount;
+        this.updatedAt = System.currentTimeMillis();
     }
 }
