@@ -3,6 +3,7 @@ package org.asa.services.impl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.transaction.Transactional;
+import org.asa.exceptions.BankAccountRuntimeException;
 import org.asa.models.AuditLog;
 import org.asa.models.Batch;
 import org.asa.models.Transaction;
@@ -11,8 +12,8 @@ import org.asa.repositories.BatchRepository;
 import org.asa.repositories.TransactionRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -38,27 +39,23 @@ class AuditService {
         this.auditLogRepository = auditLogRepository;
     }
 
-    @Scheduled(fixedRate = 60000)
-    public void scheduledBatchCheck() throws JsonProcessingException {
-        int i = 0;
-        PageRequest pageRequest = PageRequest.of(0, SUBMISSION_SIZE); // fetch 1,000 transactions at a time
-        List<Transaction> unbatchedTransactions = transactionRepository.findUnbatchedTransactions(pageRequest).getContent();
+    public void auditLogs() {
+        int page = 0;
+        PageRequest pageRequest = PageRequest.of(page, SUBMISSION_SIZE);
+        Page<Transaction> transactionPage;
 
         do {
-            // Check if there are enough transactions to create a log
-            if (unbatchedTransactions.isEmpty() || unbatchedTransactions.size() < SUBMISSION_SIZE) {
+            transactionPage = transactionRepository.findUnbatchedTransactions(pageRequest);
+            List<Transaction> transactions = transactionPage.getContent();
+            if (transactions.isEmpty()) {
                 return;
             }
-
-            // Process the batch of transactions
-            processBatch(unbatchedTransactions);
-
-            // Fetch the next batch of transactions
-            unbatchedTransactions = transactionRepository.findUnbatchedTransactions(pageRequest.withPage(++i)).getContent();
-        } while (unbatchedTransactions.size() == SUBMISSION_SIZE);
+            processBatch(transactions);
+            pageRequest = PageRequest.of(++page, SUBMISSION_SIZE);
+        } while (!transactionPage.isEmpty());
     }
 
-    private void processBatch(List<Transaction> unbatchedTransactions) throws JsonProcessingException {
+    private void processBatch(List<Transaction> unbatchedTransactions) {
 
         // Create a new audit log and batch collection which will be associated with it
         AuditLog auditLog = new AuditLog();
@@ -132,7 +129,11 @@ class AuditService {
             );
             submission.add(batchMap);
         });
-        LOGGER.info("Audit Log Submission: { \"submission\": {{}}",
-                mapper.writeValueAsString(Collections.singletonMap("batches",submission)));
+        try {
+            LOGGER.info("Audit Log Submission: { \"submission\": {{}}",
+                    mapper.writeValueAsString(Collections.singletonMap("batches",submission)));
+        } catch (JsonProcessingException e) {
+            throw new BankAccountRuntimeException(e.getMessage());
+        }
     }
 }

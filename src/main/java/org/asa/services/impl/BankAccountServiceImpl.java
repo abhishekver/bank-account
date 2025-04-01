@@ -16,15 +16,21 @@ import org.springframework.stereotype.Service;
 
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @RequiredArgsConstructor
 public class BankAccountServiceImpl implements BankAccountService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(BankAccountServiceImpl.class);
+    private static final int AUDIT_LOG_TRIGGER_THRESHOLD = 100_000; // Trigger audit log after 1000 transactions
+
     private final TransactionRepository transactionRepository;
     private final BalanceRepository balanceRepository;
+    private final AuditService auditService;
+
     private final Random random = new Random();
+    private AtomicInteger transactionCount = new AtomicInteger(0); // Track the number of transactions
 
     @Transactional
     @Scheduled(fixedRate = 40) // Generates 50 transactions per second - 25 credits and 25 debits
@@ -61,6 +67,11 @@ public class BankAccountServiceImpl implements BankAccountService {
 
                 latestBalance.applyTransaction(transaction.getAmount());
                 balanceRepository.save(latestBalance);
+                transactionCount.incrementAndGet();
+                if (transactionCount.get() == AUDIT_LOG_TRIGGER_THRESHOLD) {
+                    auditService.auditLogs(); // Trigger audit log after 1000 transactions
+                    transactionCount.set(0); // Reset the transaction count
+                }
                 updated = true; // Unlock after successful update
 
             } catch (OptimisticLockException e) {
